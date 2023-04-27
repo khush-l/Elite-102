@@ -1,67 +1,168 @@
+import os
 import mysql.connector
+import re
 
-connection = mysql.connector.connect(user = "root", database = "example", password = "Krishna#1")
+connection = mysql.connector.connect(user = "root", database = "example", password = input("Password:"))
+cursor = connection.cursor(buffered=True)
 
-def check_balance(account_number, pin):
-    cursor = connection.cursor()
-    cursor.execute("SELECT balance FROM accounting WHERE account_number = %s AND pin = %s", (account_number, pin))
+def sign_in():
+    print("==============================")
+    print("|        Welcome to          |")
+    print("|         The Vault          |")
+    print("==============================")
+    accountid = input("Please Enter Your Account ID: ")
+    accountpin = input("Please Enter Your Account pin: ") 
+    cursor.execute(f"SELECT * FROM user WHERE ID=%s AND pin=%s", (accountid, accountpin))
+    result = cursor.fetchall()
+    if result:
+        signed_in = True
+        while signed_in:
+            signed_in = menu(accountid)
+    else:
+        input("==============================\n"
+              "|   Incorrect ID or pin      |\n"
+              "|   Press enter to go back.  |\n"
+              "==============================") 
+
+
+def new_user():
+    print("===========THE VAULT===========")
+    accountname = input("Your name: ")
+    accountpin = input("Your pin: ")
+    cursor.execute("insert into user (name, pin) values (%s, %s)", (accountname, accountpin))
+    connection.commit()
+    cursor.execute("SELECT LAST_INSERT_ID()")
+    result = cursor.fetchone()
+    if result is not None:
+        accountid = result[0]
+        input(f"Your account ID is: {accountid}\nPress enter to continue.")
+    else:
+        print("Error: User was not inserted.")
+
+def check_balance(account_id):
+    cursor.execute(f"select format(balance, 2) from user where ID={account_id}")
     balance = cursor.fetchone()[0]
-    cursor.close()
-    connection.close()
-    return balance
+    input(f"""===========THE VAULT===========
+Your balance is ${balance}
+Press enter to continue.
+==========================
+""")
+    return 0
 
-# deposit funds into a specific account
-def deposit(account_number, pin, amount):
-    cursor = connection.cursor()
-    cursor.execute("UPDATE accounting SET balance = balance + %s WHERE account_number = %s AND pin = %s", (amount, account_number, pin))
+def deposit(account_id):
+    print("===========THE VAULT===========\nDeposit")
+    while True:
+        amount = input("Please enter the amount of money to deposit: ")
+        if re.match("^[0-9]{1,9}(\.[0-9]{1,2})?$", amount):
+            break
+        else:
+            print("Invalid input.")
+    input(float(amount))
+    cursor.execute("update user set balance = balance + %s where ID = %s", (float(amount), account_id))
     connection.commit()
-    cursor.close()
-    connection.close()
+    return 0
 
-# withdraw funds from a specific account
-def withdraw(account_number, pin, amount):
-    cursor = connection.cursor()
-    cursor.execute("SELECT balance FROM accounting WHERE account_number = %s AND pin = %s", (account_number, pin))
+def withdraw(account_id):
+    cursor.execute(f"select balance from user where ID={account_id}")
     balance = cursor.fetchone()[0]
-    if balance < amount:
-        raise ValueError("Insufficient funds")
-    cursor.execute("UPDATE accounting SET balance = balance - %s WHERE account_number = %s AND pin = %s", (amount, account_number, pin))
+    prompt = "Amount to withdraw: "
+    print(f"===========THE VAULT===========\n{prompt.strip(' :')} some money.")
+    while True:
+        amount = input(prompt)
+        if re.match("^[0-9]{1,9}(\.[0-9]{1,2})?$", amount) and float(amount) <= float(balance):
+            break
+        print("Invalid input.")
+    cursor.execute("update user set balance = balance - %s where ID = %s", (float(amount), account_id))
     connection.commit()
-    cursor.close()
-    connection.close()
+    return 0
 
-# create a new account
-def create_account(owner_id, pin):
-    cursor = connection.cursor()
-    cursor.execute("INSERT INTO accounting (owner_id, pin, balance) VALUES (%s, %s, 0)", (owner_id, pin))
-    account_number = cursor.lastrowid
-    connection.commit()
-    cursor.close()
-    connection.close()
-    return account_number
+def modify_account(account_id):
+    print("""\n╔═════════════════════════╗
+║      THE VAULT          ║
+╟─────────────────────────╢
+║ 1 - Edit Name           ║
+║ 2 - Edit Pin            ║
+║ O - Cancel              ║
+╚═════════════════════════╝""")
+    
+    answer = take_answer(['1', '2', 'C'])
+    
+    if answer == '1':
+        new_name = input("Please enter your new name: ")
+        cursor.execute("UPDATE user SET name = %s WHERE ID = %s", (new_name, account_id))
+        connection.commit()
+        print("Name updated.")
+    elif answer == '2':
+        new_pin = input("Please enter your new pin: ")
+        cursor.execute("UPDATE user SET pin = %s WHERE ID = %s", (new_pin, account_id))
+        connection.commit()
+        print("Pin updated.")
+    else:
+        print("Cancelled.")
+    return True
 
-# delete an existing account
-def delete_account(account_number, pin):
-    cursor = connection.cursor()
-    cursor.execute("DELETE FROM accounting WHERE account_number = %s AND pin = %s", (account_number, pin))
-    connection.commit()
-    cursor.close()
-    connection.close()
+def take_answer(options):
+    answer = input("Select option: ")
+    while answer not in options:
+        print(f"That is not an option.\nOptions are {options}")
+        answer = input("Select option: ")
+    return answer
 
-# modify an existing account
-def modify_account(account_number, pin, field, value):
-    cursor = connection.cursor()
-    cursor.execute("UPDATE accounting SET {} = %s WHERE account_number = %s AND pin = %s".format(field), (value, account_number, pin))
-    connection.commit()
-    cursor.close()
-    connection.close()
+def entrypage():
+    print("""
+╭─────────────╮
+│     THE     │
+│    VAULT    │
+│             │
+│   1 - Sign  │
+│     in      │
+│             │
+│2 - Create   │
+│   Account   │
+╰─────────────╯""")
 
-# create tables for user and account data
-def create_tables():
-    cursor = connection.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS new_table (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(50), username VARCHAR(20), password VARCHAR(20), email VARCHAR(50), phone VARCHAR(20), role ENUM('customer', 'admin'))")
-    cursor.execute("CREATE TABLE IF NOT EXISTS accounting (account_number INT PRIMARY KEY AUTO_INCREMENT, owner_id INT, FOREIGN KEY (owner_id) REFERENCES users(id), balance DECIMAL(10, 2))")
-    connection.commit()
-    cursor.close()
-    connection.close()
-create_tables()
+    answer = take_answer(['1', '2'])
+
+    if answer == '1':
+        sign_in()
+    else:
+        new_user()
+
+
+def menu(account_id):
+    print("""
+            ┌─────────────┐
+            │   THE VAULT │
+            ├─────────────┤
+            │ 1 - Check Balance  │
+            │ 2 - Deposit        │
+            │ 3 - Withdraw       │
+            │ 4 - Modify Account │
+            │ 0 - Logout         │
+            └─────────────┘
+        """)
+
+    answer = take_answer(['1', '2', '3', '4', '0'])
+
+    if answer == '1':
+        check_balance(account_id)
+        return True
+    elif answer == '2':
+        deposit(account_id)
+        return True
+    elif answer == '3':
+        withdraw(account_id)
+        return True
+    elif answer == '4':
+        modify_account(account_id)
+        return True
+    else:
+        return False
+
+
+def main():
+    while True:
+        entrypage()
+
+main()
+connection.close()
